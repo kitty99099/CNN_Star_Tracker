@@ -1,7 +1,5 @@
 import numpy as np
 #from camera_software import camera_software
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 import cv2
 from star_detection_centroiding import *
 from itertools import combinations
