@@ -429,7 +429,7 @@ if __name__ == '__main__':
 
     if args.input == 'camera':
         # main_camera(args)
-        print('We don't support camera input now')
+        print('We do not support camera input now')
     elif args.input == 'video':
         main_video(args)
     else:
