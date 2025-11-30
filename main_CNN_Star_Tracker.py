@@ -428,7 +428,8 @@ if __name__ == '__main__':
     args = parser.parse_args() 
 
     if args.input == 'camera':
-        #main_camera(args)
+        # main_camera(args)
+        print('We don't support camera input now')
     elif args.input == 'video':
         main_video(args)
     else:
