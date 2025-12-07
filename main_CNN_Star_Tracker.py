@@ -265,7 +265,7 @@ def run_neural_net(img):
     std =  [44.31162568]
 
     overlay = DpuOverlay("dpu.bit")              # 你的 overlay 名稱
-    overlay.load_model(args.xmodel)      # 你編好的 xmodel
+    overlay.load_model("./CNN_Star_Tracker_Model_V1.xmodel")      # 你編好的 xmodel
     runner = overlay.runner
 
     #取得 tensor 屬性
@@ -423,8 +423,6 @@ if __name__ == '__main__':
     parser.add_argument("--save_video", action='store_true')
     parser.add_argument("--input", type=str, default='camera')
     parser.add_argument("--video_file", type=str, default=None)
-    parser.add_argument("--xmodel", type=str, default="./CNN_Star_Tracker_Model_V1.xmodel",
-                        help="Path to compiled .xmodel for DPU (default: ./CNN_Star_Tracker_Model_V1.xmodel)")
 
 
     args = parser.parse_args() 
