@@ -88,6 +88,44 @@ def SVD_method(star_vectors, star_vectors_ver):
 
     return A, solution
 
+def distortion_correction(centroids_distorted, p, u_0, v_0):
+    """
+        @param centroids_distorted: list of distorted centroids
+        @param p: distortion coefficients
+        @param u_0:
+        @param v_0:
+        Ref:
+        Heikkila, J., and Silven, O., "A Four-Step Camera Calibration Procedure with Implicit
+        Image Correction," Proceedings of IEEE Computer Society Conference on Computer Vision
+        and Pattern Recognition, San Juan, Puerto Rico, USA, 1997
+    """
+    a_1 = p[0]
+    a_2 = p[1]
+    a_3 = p[2]
+    a_4 = p[3]
+    a_5 = p[4]
+    a_6 = p[5]
+    a_7 = p[6]
+    a_8 = p[7]
+
+    correctd_centroid_result = []
+
+    for item in centroids_distorted:
+        u = item[0]
+        v = item[1]
+
+        u_d = u - u_0
+        v_d = v - v_0
+
+        r = math.sqrt(u_d**2 + v_d**2)
+        G = (a_5*r**2 + a_6*u_d + a_7*v_d + a_8)*r**2 + 1
+        u_u = (1/G) * (u_d + u_d*(a_1*r**2 + a_2*r**4) + 2*a_3*u_d*v_d + a_4*(r**2+2*u_d**2))
+        v_u = (1/G) * (v_d + v_d*(a_1*r**2 + a_2*r**4) + a_3*(r**2+2*v_d**2) + 2*a_4*u_d*v_d)
+
+        correctd_centroid_result.append([u_u + u_0, v_u + v_0])
+
+    return correctd_centroid_result
+
 def visualize_angular_distance(centroid, img, selected_stars=None):
 
     ### calibration parameters ###
