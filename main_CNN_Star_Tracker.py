@@ -189,6 +189,7 @@ def visualize_angular_distance(centroid, img, selected_stars=None):
 
     # draw lines and angular distance
     dot_product_array = star_vector_array @ np.transpose(star_vector_array)
+    dot_product_array = np.clip(dot_product_array, -1.0, 1.0)
     angular_distance_array = np.rad2deg(np.arccos(dot_product_array))
 
     indices = np.arange(angular_distance_array.shape[0])
@@ -293,8 +294,25 @@ def trilateration_centroid_vectorization(dist_map, seg_map, radius, pixel_size=6
 
     return centroid_est
 
-def run_neural_net(img):
-    
+def init_neural_net(xmodel_path):
+    overlay = DpuOverlay("dpu.bit")              # 你的 overlay 名稱
+    overlay.load_model(xmodel_path)      # 你編好的 xmodel
+    runner = overlay.runner
+
+    #取得 tensor 屬性
+    inp_t = runner.get_input_tensors()[0]
+    out_t = runner.get_output_tensors()[0]
+    return {
+        "overlay": overlay,
+        "runner": runner,
+        "in_shape": inp_t.dims,
+        "out_shape": out_t.dims,
+        "in_fix": inp_t.get_attr("fix_point"),
+        "out_fix": out_t.get_attr("fix_point"),
+    }
+
+def run_neural_net(img, nn_ctx):
+
     pixel_size = 1 # get centroid in pixel instead of mm
     radius = 7
 
@@ -302,27 +320,22 @@ def run_neural_net(img):
     mean = [25.36114133]
     std =  [44.31162568]
 
-    overlay = DpuOverlay("dpu.bit")              # 你的 overlay 名稱
-    overlay.load_model(args.xmodel)      # 你編好的 xmodel
-    runner = overlay.runner
-
-    #取得 tensor 屬性
-    inp_t = runner.get_input_tensors()[0]
-    out_t = runner.get_output_tensors()[0]
-    in_shape = inp_t.dims # e.g. [1,1,480,640]
-    in_fix = inp_t.get_attr("fix_point")
-    out_fix = out_t.get_attr("fix_point")
+    runner = nn_ctx["runner"]
+    in_shape = nn_ctx["in_shape"]
+    out_shape = nn_ctx["out_shape"]
+    in_fix = nn_ctx["in_fix"]
+    out_fix = nn_ctx["out_fix"]
 
     # img_np: (H,W) float32/float64
     # 前處理：normalize + 量化成 int8
     img_f = img.astype(np.float32)
     img_f = (img_f - mean) / std
     scale = 2 ** in_fix
-    inp_int8 = np.round(img_f * scale).astype(np.int8).reshape(in_shape)
+    inp_int8 = np.clip(np.round(img_f * scale), -128, 127).astype(np.int8).reshape(in_shape)
 
     # 配置 buffer
     input_buf = [np.empty_like(inp_int8)]
-    output_buf = [np.empty(out_t.dims, dtype=np.int8)]
+    output_buf = [np.empty(out_shape, dtype=np.int8)]
     input_buf[0][...] = inp_int8
 
     # 執行
@@ -331,9 +344,15 @@ def run_neural_net(img):
 
     # 反量化輸出
     out_scale = 2 ** out_fix
-    out_f = output_buf[0].astype(np.float32) / out_scale  # shape: [1,2,H,W]
-    seg_prediction = (1.0 / (1.0 + np.exp(-out_f[0,0]))) > 0.5       # segmentation mask
-    dist_prediction = out_f[0,1]                                     # distance map
+    out_f = output_buf[0].astype(np.float32) / out_scale
+    if out_f.shape[1] == 2:
+        seg_prediction = (1.0 / (1.0 + np.exp(-out_f[0, 0]))) > 0.5
+        dist_prediction = out_f[0, 1]
+    elif out_f.shape[-1] == 2:
+        seg_prediction = (1.0 / (1.0 + np.exp(-out_f[0, :, :, 0]))) > 0.5
+        dist_prediction = out_f[0, :, :, 1]
+    else:
+        raise ValueError(f"Unsupported DPU output shape: {out_f.shape}")
 
     centroid_est = trilateration_centroid_vectorization(dist_prediction.copy(), seg_prediction.copy(), radius, pixel_size)
 
@@ -392,62 +411,70 @@ def main_video(args):
     video = np.load(video_path)
 
     # load neural net
+    nn_ctx = init_neural_net(args.xmodel) if args.mode == 'NN' else None
 
     print(f'running {args.mode}')
 
     animation = []
 
-    for i in trange(video.shape[0], smoothing=0):
-        
-        img = video[i].astype('float32')
+    i = -1
+    try:
+        for i in trange(video.shape[0], smoothing=0):
 
-        if args.mode == 'NN':
-            centroid_est = run_neural_net(img.copy())
-        elif args.mode == 'baseline':
-            centroid_est = run_baseline(img)
-        else:
-            print("WRONG MODE")
-            break
+            img = video[i].astype('float32')
 
-        if len(centroid_est) > 0 and len(centroid_est) < 30:
-            vis, angular_distance_array, comb, star_vector_array = visualize_angular_distance(centroid_est, img, None)
-            vis = cv2.cvtColor(vis.astype('uint8'), cv2.COLOR_BGR2RGB)
-            geometric_voting_obj.centroid_result = centroid_est
-            geometric_voting_obj.star_identification(angular_distance_array, comb)
-            A, solution = SVD_method(star_vector_array, geometric_voting_obj.star_vectors_ver)
-            if solution: # 3-2-1 euler angles
-                A = A_star @ A  # from ICRF, to Z axis boresight body frame, to X axis boresight body frame
-                phi = math.degrees(math.atan2(A[0,1], A[0,0]))
-                theta = math.degrees(math.atan2( -A[0,2], math.sqrt(1-A[0,2]**2) ))
-                psi = math.degrees(math.atan2(A[1,2], A[2,2]))
-                attitude.append([i, phi, theta, psi])
-        else:
-            vis = np.zeros(( img.shape[0], img.shape[1], 3))
-
-        img = cv2.cvtColor(np.clip(img*3, a_min=0, a_max=255).astype('uint8'), cv2.COLOR_GRAY2RGB)
-           
-        draw_centroids(centroid_est, img, 1.0, detection_vis_radius, geometric_voting_obj.star_vectors_ver, geometric_voting_obj.star_catalog)
-        
-        identified_centroids = []
-        if len(geometric_voting_obj.star_vectors_ver) > 0:
-            identified_centroids = np.asarray(geometric_voting_obj.star_vectors_ver)[:,4] 
-        id_rate.append([len(centroid_est), len(identified_centroids)])
-
-        if args.display:
-            cv2.imshow('Star Detection and Centroiding', img)
-            cv2.imshow('Angular Distacne', vis)
-        animation.append(img)
-
-        print('Num of Centroids = {}, num of ids = {}, att=[{:.4f},{:.4f},{:.4f}]'.format(len(centroid_est), len(geometric_voting_obj.star_vectors_ver), phi, theta, psi))
-        # two lines below is to erase the previous print message
-        sys.stdout.write("\033[F") # Cursor up one line
-        sys.stdout.write("\033[K") # Clear to the end of line ( if you print something shorter than before)
-
-        if args.display:
-            k = cv2.waitKey(1)
-            if k == ord('q'):
-                print("Close Program")
+            if args.mode == 'NN':
+                centroid_est = run_neural_net(img.copy(), nn_ctx)
+            elif args.mode == 'baseline':
+                centroid_est = run_baseline(img)
+            else:
+                print("WRONG MODE")
                 break
+
+            if len(centroid_est) > 0 and len(centroid_est) < 30:
+                vis, angular_distance_array, comb, star_vector_array = visualize_angular_distance(centroid_est, img, None)
+                vis = cv2.cvtColor(vis.astype('uint8'), cv2.COLOR_BGR2RGB)
+                geometric_voting_obj.centroid_result = centroid_est
+                geometric_voting_obj.star_identification(angular_distance_array, comb)
+                A, solution = SVD_method(star_vector_array, geometric_voting_obj.star_vectors_ver)
+                if solution: # 3-2-1 euler angles
+                    A = A_star @ A  # from ICRF, to Z axis boresight body frame, to X axis boresight body frame
+                    phi = math.degrees(math.atan2(A[0,1], A[0,0]))
+                    theta = math.degrees(math.atan2( -A[0,2], math.sqrt(1-A[0,2]**2) ))
+                    psi = math.degrees(math.atan2(A[1,2], A[2,2]))
+                    attitude.append([i, phi, theta, psi])
+            else:
+                vis = np.zeros(( img.shape[0], img.shape[1], 3))
+
+            img = cv2.cvtColor(np.clip(img*3, a_min=0, a_max=255).astype('uint8'), cv2.COLOR_GRAY2RGB)
+
+            draw_centroids(centroid_est, img, 1.0, detection_vis_radius, geometric_voting_obj.star_vectors_ver, geometric_voting_obj.star_catalog)
+
+            identified_centroids = []
+            if len(geometric_voting_obj.star_vectors_ver) > 0:
+                identified_centroids = np.asarray(geometric_voting_obj.star_vectors_ver)[:,4]
+            id_rate.append([len(centroid_est), len(identified_centroids)])
+
+            if args.display:
+                cv2.imshow('Star Detection and Centroiding', img)
+                cv2.imshow('Angular Distacne', vis)
+            animation.append(img)
+
+            print('Num of Centroids = {}, num of ids = {}, att=[{:.4f},{:.4f},{:.4f}]'.format(len(centroid_est), len(geometric_voting_obj.star_vectors_ver), phi, theta, psi))
+            # two lines below is to erase the previous print message
+            sys.stdout.write("\033[F") # Cursor up one line
+            sys.stdout.write("\033[K") # Clear to the end of line ( if you print something shorter than before)
+
+            if args.display:
+                k = cv2.waitKey(1)
+                if k == ord('q'):
+                    print("Close Program")
+                    break
+    except KeyboardInterrupt:
+        print("\nInterrupted by user. Saving partial results...")
+    finally:
+        if args.display:
+            cv2.destroyAllWindows()
 
     print("save star detection and centroiding results")
     np.save(f'./saved_results/attitude_{args.mode}_{i}.npy', np.asarray(attitude))
