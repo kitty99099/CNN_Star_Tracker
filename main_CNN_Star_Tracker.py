@@ -433,8 +433,9 @@ def main_video(args):
             identified_centroids = np.asarray(geometric_voting_obj.star_vectors_ver)[:,4] 
         id_rate.append([len(centroid_est), len(identified_centroids)])
 
-        cv2.imshow('Star Detection and Centroiding', img) 
-        cv2.imshow('Angular Distacne', vis) 
+        if args.display:
+            cv2.imshow('Star Detection and Centroiding', img)
+            cv2.imshow('Angular Distacne', vis)
         animation.append(img)
 
         print('Num of Centroids = {}, num of ids = {}, att=[{:.4f},{:.4f},{:.4f}]'.format(len(centroid_est), len(geometric_voting_obj.star_vectors_ver), phi, theta, psi))
@@ -442,10 +443,11 @@ def main_video(args):
         sys.stdout.write("\033[F") # Cursor up one line
         sys.stdout.write("\033[K") # Clear to the end of line ( if you print something shorter than before)
 
-        k = cv2.waitKey(1)
-        if k == ord('q'):
-            print("Close Program")
-            break
+        if args.display:
+            k = cv2.waitKey(1)
+            if k == ord('q'):
+                print("Close Program")
+                break
 
     print("save star detection and centroiding results")
     np.save(f'./saved_results/attitude_{args.mode}_{i}.npy', np.asarray(attitude))
@@ -463,6 +465,8 @@ if __name__ == '__main__':
     parser.add_argument("--video_file", type=str, default=None)
     parser.add_argument("--xmodel", type=str, default="./CNN_Star_Tracker_Model_V1.xmodel",
                         help="Path to compiled .xmodel for DPU (default: ./CNN_Star_Tracker_Model_V1.xmodel)")
+    parser.add_argument("--display", action='store_true',
+                        help="Show OpenCV windows. Leave disabled when running headless over SSH.")
 
 
     args = parser.parse_args() 
