@@ -279,8 +279,8 @@ def run_neural_net(img):
     # 前處理：normalize + 量化成 int8
     img_f = img.astype(np.float32)
     img_f = (img_f - mean) / std
-    scale = 2 ** IN_FIX
-    inp_int8 = np.round(img_f * scale).astype(np.int8).reshape(IN_SHAPE)
+    scale = 2 ** in_fix
+    inp_int8 = np.round(img_f * scale).astype(np.int8).reshape(in_shape)
 
     # 配置 buffer
     input_buf = [np.empty_like(inp_int8)]
@@ -292,7 +292,7 @@ def run_neural_net(img):
     runner.wait(jid)
 
     # 反量化輸出
-    out_scale = 2 ** OUT_FIX
+    out_scale = 2 ** out_fix
     out_f = output_buf[0].astype(np.float32) / out_scale  # shape: [1,2,H,W]
     seg_prediction = (1.0 / (1.0 + np.exp(-out_f[0,0]))) > 0.5       # segmentation mask
     dist_prediction = out_f[0,1]                                     # distance map
