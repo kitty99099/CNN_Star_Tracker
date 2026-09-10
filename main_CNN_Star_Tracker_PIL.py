@@ -758,7 +758,14 @@ def main():
     if not args.inspect_model and not args.profile:
         parser.error("--profile required for server mode")
     # Resolve CLI paths before selecting the script directory for legacy catalog paths.
-    xmodel, bitfile = Path(args.xmodel).resolve(), Path(args.bitfile).resolve()
+    xmodel = Path(args.xmodel).resolve()
+    # Keep bare overlay names for DpuOverlay's installed-package search.
+    # Existing local files and explicit paths retain the caller's working directory.
+    bitfile_path = Path(args.bitfile)
+    bitfile = (str(bitfile_path.resolve())
+               if bitfile_path.is_file() or bitfile_path.is_absolute()
+               or bitfile_path.parent != Path(".")
+               else args.bitfile)
     profile = load_profile(args.profile) if args.profile else None
     log_path = Path(args.log).resolve()
     os.chdir(SCRIPT_PATH.parent)
