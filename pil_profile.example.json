@@ -1,0 +1,11 @@
+{
+  "calibration_id": "PIL_IDEAL_DEMO_NOT_FLIGHT",
+  "width": 640,
+  "height": 480,
+  "focal_px": 2680.049125,
+  "cx": 352.84399,
+  "cy": 199.46077,
+  "distortion": "none",
+  "pixel_convention": "simulator_native",
+  "centroid_offset_px": [0.0, 0.0]
+}
