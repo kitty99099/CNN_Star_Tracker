@@ -194,13 +194,22 @@ class ArducamUsbCamera:
         while self.running:
             ret = self.sdk.Py_ArduCam_captureImage(self.handle)
             if ret > 0xFF:
-                self.capture_error = RuntimeError(
-                    f"Arducam capture failed: {arducam_error(ret)}"
+                # The SDK can report frame-level transfer errors while the
+                # USB stream is synchronizing. Discard those frames and keep
+                # capturing; read() will still time out if no valid frame
+                # arrives. Only a failed USB capture task is fatal.
+                fatal_error = getattr(
+                    self.sdk, "USB_CAMERA_USB_TASK_ERROR", 0xFF20
                 )
-                self.running = False
-                with self.signal:
-                    self.signal.notify_all()
-                return
+                if ret == fatal_error:
+                    self.capture_error = RuntimeError(
+                        f"Arducam capture failed: {arducam_error(ret)}"
+                    )
+                    self.running = False
+                    with self.signal:
+                        self.signal.notify_all()
+                    return
+                continue
             if ret > 0:
                 with self.signal:
                     self.signal.notify_all()
