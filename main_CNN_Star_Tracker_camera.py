@@ -326,7 +326,6 @@ def load_pipeline() -> SimpleNamespace:
         SVD_method=pipeline.SVD_method,
         draw_centroids=pipeline.draw_centroids,
         geometric_voting=pipeline.geometric_voting,
-        run_baseline=pipeline.run_baseline,
         run_neural_net=pipeline.run_neural_net,
         visualize_angular_distance=pipeline.visualize_angular_distance,
     )
@@ -359,10 +358,7 @@ def process_frame(
 ) -> Tuple[np.ndarray, np.ndarray, list, Tuple[float, float, float], bool]:
     import cv2
 
-    if args.mode == "NN":
-        centroids = pipeline.run_neural_net(image.copy(), neural_net)
-    else:
-        centroids = pipeline.run_baseline(image)
+    centroids = pipeline.run_neural_net(image.copy(), neural_net)
 
     voting.star_vectors_ver = []
     phi = theta = psi = 0.0
@@ -433,13 +429,13 @@ def main_camera(args: argparse.Namespace) -> None:
     import cv2
 
     pipeline = load_pipeline()
-    neural_net = (
-        load_neural_net(args.overlay, args.xmodel) if args.mode == "NN" else None
-    )
-    if neural_net is not None:
-        model_height, model_width = infer_model_hw(neural_net["in_shape"])
-    else:
-        model_height, model_width = args.model_height, args.model_width
+    print(f"Loading DPU overlay: {args.overlay}")
+    print(f"Loading XModel: {args.xmodel}")
+    neural_net = load_neural_net(args.overlay, args.xmodel)
+    model_height, model_width = infer_model_hw(neural_net["in_shape"])
+    print(f"DPU input: {model_width}x{model_height} MONO8")
+
+    print(f"Opening Arducam USB camera with config: {args.camera_config}")
 
     camera = ArducamUsbCamera(args.camera_config, args.camera_index)
     voting = pipeline.geometric_voting()
@@ -454,6 +450,12 @@ def main_camera(args: argparse.Namespace) -> None:
         while args.frames == 0 or frame_index + 1 < args.frames:
             frame_index += 1
             captured = camera.read(args.capture_timeout)
+            if frame_index == 0:
+                print(
+                    "Captured first Arducam USB frame: "
+                    f"{captured.shape[1]}x{captured.shape[0]} "
+                    f"{captured.dtype}; sending frames to the DPU"
+                )
             image = prepare_model_input(
                 captured, model_height, model_width, args.frame_fit
             )
@@ -517,7 +519,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--camera-index", type=int, default=0)
     parser.add_argument("--capture-timeout", type=float, default=1.5)
-    parser.add_argument("--mode", choices=("NN", "baseline"), default="NN")
+    parser.add_argument(
+        "--mode",
+        choices=("NN",),
+        default="NN",
+        help="DPU neural-network inference (the only supported camera mode)",
+    )
     parser.add_argument("--overlay", default="dpu.bit")
     parser.add_argument(
         "--xmodel", default="DPU_models/CNN_Star_Tracker_Model_V6.xmodel"
